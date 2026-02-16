@@ -77,33 +77,46 @@ class FlashMLAImpl(MLACommonImpl[FlashMLAMetadata]):
         )
 
     def _get_num_splits(self, batch_size: int) -> int:
-
-        BLOCK_H = 16
-        heads_per_block = max(1, self.num_heads // BLOCK_H) 
-        base_grid = batch_size * heads_per_block
-
-        if base_grid == 0: 
-            return 1
+      
+      num_sms = self.num_sms  # 108
         
-        num_sms = self.num_sms 
-        
-        if base_grid >= num_sms * 0.8:
-            return 1
-
-        target_grid = num_sms * 2
-        
-        best_split = target_grid // base_grid
-        
-        max_split = 32
-        
-        if best_split > max_split:
-            best_split_1_wave = num_sms // base_grid
-            if best_split_1_wave <= max_split:
-                best_split = best_split_1_wave
-            else:
-                best_split = max_split
-                
-        return max(1, best_split)
+      # Base Grid Calculation
+      BLOCK_H = 16
+      heads_per_block = max(1, self.num_heads // BLOCK_H)
+      base_grid = batch_size * heads_per_block
+      
+      if base_grid == 0: return 1
+      
+      # ============================================================
+      # 分档策略 (针对 Block-64 优化)
+      # ============================================================
+      
+      # 场景 1：大 Batch (>= 24)
+      # 32 * 3 = 96 Blocks (Occupancy 89%)
+      # 1024 seq -> 5.3 blocks/split (流水线安全)
+      if base_grid >= 24:
+          return 3
+          
+      # 场景 2：中等 Batch (>= 12)
+      # 16 * 5 = 80 Blocks (Occupancy 74%)
+      # 为什么要 5 而不是 6？
+      # Split-6 @ 1024seq = 2.6 blocks (流水线危险)
+      # Split-5 @ 1024seq = 3.2 blocks (流水线安全)
+      elif base_grid >= 12:
+          return 5 
+          
+      # 场景 3：小 Batch (< 12)
+      # 动态计算填满 80% SM 需要的 splits，但强制封顶
+      else:
+          target_occupancy = int(num_sms * 0.8)
+          needed_splits = (target_occupancy + base_grid - 1) // base_grid
+          
+          # 🔥 核心修正：最大 Split 锁死在 8
+          # Split-8 @ 1024seq = 2 blocks (勉强能跑，再多就崩了)
+          # Split-8 @ 2048seq = 4 blocks (完美)
+          max_safe_splits = 8
+          
+          return max(1, min(needed_splits, max_safe_splits))
 
 
     def _forward_decode(self, q, kv_cache, attn_metadata, layer=None):
@@ -131,8 +144,8 @@ class FlashMLAImpl(MLACommonImpl[FlashMLAMetadata]):
         v_cache = kv_cache[..., :d_nope]  # v only has nope
         
         if is_int8:
-            self.k_scale_tensor.fill_(1.0 / 127.0)
-            self.v_scale_tensor.fill_(1.0 / 127.0)
+            self.k_scale_tensor.fill_(0.5)
+            self.v_scale_tensor.fill_(0.5)
         else:
             self.k_scale_tensor.fill_(1.0)
             self.v_scale_tensor.fill_(1.0)
