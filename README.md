@@ -13,11 +13,8 @@ This fork integrates **[FlashMLA](https://github.com/Jayden-Xu/FlashMLA)**, a sp
 
 We benchmarked this backend against the official vLLM MLA baseline on **NVIDIA A100-80GB** using **DeepSeek-V2-Lite-Chat** with **CUDA Graph enabled**.
 
-![FlashMLA Decode Throughput](./assets/benchmark_throughput.png)
-
-![FlashMLA Decode Latency](./assets/benchmark_latency.png)
-
-![FlashMLA Decode Precision](./assets/benchmark_precision.png)
+![FlashMLA Decode Throughput Short](./assets/flashmla_benchmark_1024_2048.png)
+![FlashMLA Decode Throughput Long](./assets/flashmla_benchmark_4096_8192.png)
 
 ---
 <p align="center">
