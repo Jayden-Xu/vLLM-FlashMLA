@@ -5,9 +5,8 @@ import os
 import csv
 import shutil
 from datetime import datetime
-from typing import Tuple, Optional
+from typing import Optional
 
-# ================= 配置区域 =================
 MODEL_PATH = "deepseek-ai/DeepSeek-V2-Lite-Chat"
 GPU_MEM_UTIL = "0.9"
 ENV_VAR_NAME = "DISABLE_FLASH_MLA" 
@@ -16,7 +15,6 @@ MAX_MODEL_LEN = 9000
 MAX_BATCH_TOKENS = 65536
 GPU_COOLDOWN_SECONDS = 5
 
-# 测试配置: (Input, Output, BatchSizes)
 DECODE_FOCUSED_CONFIGS = [
     (1024, 256, [1, 4, 8, 16, 32]),
     (2048, 256, [1, 4, 8, 16, 32]),
@@ -28,7 +26,6 @@ TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 CSV_FILE = f"flashmla_bench_{TIMESTAMP}.csv"
 LOG_DIR = f"logs_{TIMESTAMP}"
 
-# ================= 工具函数 =================
 GREEN = "\033[92m"
 RED = "\033[91m"
 CYAN = "\033[96m"
@@ -45,10 +42,7 @@ def clear_triton_cache():
         except: pass
 
 def run_vllm_throughput(disable_custom: bool, kv_dtype: str, in_len: int, out_len: int, bs: int, is_warmup: bool = False) -> Optional[str]:
-    """
-    kv_dtype: "auto" (对应 bf16) 或 "int8"
-    disable_custom: True=Base, False=FlashMLA
-    """
+
     env = os.environ.copy()
     env[ENV_VAR_NAME] = "1" if disable_custom else "0"
     
@@ -63,16 +57,13 @@ def run_vllm_throughput(disable_custom: bool, kv_dtype: str, in_len: int, out_le
         "--max-num-seqs", str(bs), 
         "--max-model-len", str(MAX_MODEL_LEN),
         "--trust-remote-code",
-        "--dtype", "bfloat16",        # ✨ 统一使用 bfloat16 计算
-        "--kv-cache-dtype", kv_dtype, # ✨ 控制 KV 类型 (auto/int8)
+        "--dtype", "bfloat16",
+        "--kv-cache-dtype", kv_dtype,
         "--gpu-memory-utilization", GPU_MEM_UTIL,
         "--disable-log-stats",
         "--no-enable-chunked-prefill",
         "--max-num-batched-tokens", str(MAX_BATCH_TOKENS)
     ]
-    
-    # 如果你的 checkpoint 里没有 scale，这里可能需要加上 --quantization-param-path
-    # cmd.extend(["--quantization-param-path", "kv_scales.json"])
 
     try:
         res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -86,30 +77,25 @@ def parse_info(output: Optional[str]) -> dict:
     info = {
         "tps": 0.0,
         "mode": "N/A",
-        "scales": "" # 默认为空
+        "scales": ""
     }
 
     if not output or any(x in output for x in ["ERROR", "CRASH", "out of memory"]): 
         info["mode"] = "Err/OOM"
         return info
     
-    # 1. 解析 TPS
     m = re.search(r"([\d\.]+)\s+output tokens/s", output)
     if not m: m = re.search(r"Throughput:\s+([\d\.]+)", output)
     if m: info["tps"] = float(m.group(1))
 
-    # 2. 解析 FlashMLA Config
     if "[FlashMLA-Config]" in output:
-        # 解析 Splits
         m_split = re.search(r"NumSplits=(\d+)", output)
         if m_split:
             info["mode"] = f"Split-{m_split.group(1)}"
         
-        # 解析 Scales (如果有)
         m_scales = re.search(r"Scales=\(k=([\d\.]+),\s*v=([\d\.]+)\)", output)
         if m_scales:
             k, v = m_scales.group(1), m_scales.group(2)
-            # 如果是默认值 1.0，可以简化显示，或者始终显示
             info["scales"] = f"Scale:[{k}/{v}]"
     else:
         info["mode"] = "Base"
@@ -119,7 +105,6 @@ def parse_info(output: Optional[str]) -> dict:
 def main():
     print(f"{BOLD}FlashMLA Benchmark (BF16 Compute, MaxLen={MAX_MODEL_LEN}){RESET}")
     print("=" * 110)
-    # 表头去掉了冗余的 INT8 状态列
     print(f"{'In':<5} {'Out':<5} {'BS':<4} | {'Base TPS':<9} | {'BF16 TPS':<9} {'Speedup':<9} | {'INT8 TPS':<9} {'Speedup':<9} | {'Config Info'}")
     print("-" * 110)
 
@@ -130,7 +115,7 @@ def main():
         for in_len, out_len, batch_sizes in DECODE_FOCUSED_CONFIGS:
             for bs in batch_sizes:
                 
-                # 1. Base (vLLM Official)
+                # vLLM
                 run_vllm_throughput(True, "auto", in_len, out_len, bs, is_warmup=True)
                 out_base = run_vllm_throughput(True, "auto", in_len, out_len, bs)
                 info_base = parse_info(out_base)
@@ -138,7 +123,7 @@ def main():
                 
                 time.sleep(GPU_COOLDOWN_SECONDS)
 
-                # 2. Ours (BF16 KV)
+                # ours (BF16 KV)
                 clear_triton_cache()
                 run_vllm_throughput(False, "auto", in_len, out_len, bs, is_warmup=True)
                 out_fp16 = run_vllm_throughput(False, "auto", in_len, out_len, bs)
@@ -150,7 +135,7 @@ def main():
                 
                 time.sleep(GPU_COOLDOWN_SECONDS)
 
-                # 3. Ours (INT8 KV)
+                # ours (INT8 KV)
                 clear_triton_cache()
                 run_vllm_throughput(False, "int8", in_len, out_len, bs, is_warmup=True)
                 out_int8 = run_vllm_throughput(False, "int8", in_len, out_len, bs)
@@ -160,7 +145,7 @@ def main():
                 int8_speedup = int8_tps / base_tps if base_tps > 0 else 0
                 int8_color = GREEN if int8_speedup >= 1.05 else RED if int8_speedup < 0.95 else ""
 
-                # Meta Info (取 INT8 的 config，因为通常包含 Scales)
+                # Meta Info
                 split_info = info_int8["mode"]
                 scales_info = info_int8["scales"]
                 meta_info = f"{split_info} {scales_info}".strip()
