@@ -356,12 +356,11 @@ def _mla_write_int8_kernel(
         + slot_offset * stride_cache_s
     )
     
-    # Write k_c_normed (nope part)
     d_nope_range = tl.arange(0, kv_lora_rank)
     k_c_normed_data = tl.load(
         k_c_normed_ptr + token_idx * stride_kc_n + d_nope_range * stride_kc_d
     )
-    # 🔥 简单量化：除以 scale，然后 clamp
+
     k_c_normed_quant = k_c_normed_data / scale
     k_c_normed_quant = tl.clamp(k_c_normed_quant, -128.0, 127.0)
     tl.store(
@@ -369,12 +368,10 @@ def _mla_write_int8_kernel(
         k_c_normed_quant
     )
     
-    # Write k_pe (rope part)
     d_pe_range = tl.arange(0, qk_rope_head_dim)
     k_pe_data = tl.load(
         k_pe_ptr + token_idx * stride_pe_n + d_pe_range * stride_pe_d
     )
-    # 🔥 简单量化
     k_pe_quant = k_pe_data / scale
     k_pe_quant = tl.clamp(k_pe_quant, -128.0, 127.0)
     tl.store(

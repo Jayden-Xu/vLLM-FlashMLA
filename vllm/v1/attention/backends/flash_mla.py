@@ -17,7 +17,6 @@ from vllm.platforms.interface import DeviceCapability
 from vllm.v1.attention.backend import AttentionCGSupport, MultipleOf
 from vllm.v1.kv_cache_interface import AttentionSpec
 
-# 确保导入路径正确
 from vllm.v1.attention.ops.triton_flash_mla import flash_mla_decode
 
 logger = init_logger(__name__)
@@ -78,42 +77,22 @@ class FlashMLAImpl(MLACommonImpl[FlashMLAMetadata]):
 
     def _get_num_splits(self, batch_size: int) -> int:
       
-      num_sms = self.num_sms  # 108
-        
-      # Base Grid Calculation
+      num_sms = self.num_sms 
       BLOCK_H = 16
       heads_per_block = max(1, self.num_heads // BLOCK_H)
       base_grid = batch_size * heads_per_block
       
       if base_grid == 0: return 1
       
-      # ============================================================
-      # 分档策略 (针对 Block-64 优化)
-      # ============================================================
-      
-      # 场景 1：大 Batch (>= 24)
-      # 32 * 3 = 96 Blocks (Occupancy 89%)
-      # 1024 seq -> 5.3 blocks/split (流水线安全)
       if base_grid >= 24:
           return 3
-          
-      # 场景 2：中等 Batch (>= 12)
-      # 16 * 5 = 80 Blocks (Occupancy 74%)
-      # 为什么要 5 而不是 6？
-      # Split-6 @ 1024seq = 2.6 blocks (流水线危险)
-      # Split-5 @ 1024seq = 3.2 blocks (流水线安全)
+
       elif base_grid >= 12:
           return 5 
-          
-      # 场景 3：小 Batch (< 12)
-      # 动态计算填满 80% SM 需要的 splits，但强制封顶
+      
       else:
           target_occupancy = int(num_sms * 0.8)
           needed_splits = (target_occupancy + base_grid - 1) // base_grid
-          
-          # 🔥 核心修正：最大 Split 锁死在 8
-          # Split-8 @ 1024seq = 2 blocks (勉强能跑，再多就崩了)
-          # Split-8 @ 2048seq = 4 blocks (完美)
           max_safe_splits = 8
           
           return max(1, min(needed_splits, max_safe_splits))
@@ -129,7 +108,6 @@ class FlashMLAImpl(MLACommonImpl[FlashMLAMetadata]):
         
         d_nope = self.kv_lora_rank
         
-        # --- 1. 处理 INT8 ---
         is_int8 = False
         if kv_cache.dtype == torch.uint8:
             is_int8 = True
