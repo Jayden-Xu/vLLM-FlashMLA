@@ -1,17 +1,28 @@
-<!-- markdownlint-disable MD001 MD041 -->
-
 <div align="center">
-<h1>vLLM-FlashMLA</h1>
+<h1>FlashMLA</h1>
 <p>
-<strong>High-Performance Integration of <a href="https://github.com/Jayden-Xu/FlashMLA">FlashMLA</a></strong>
+<strong>High-Performance Multi-Head Latent Attention Kernels</strong>
 </p>
 </div>
 
-This fork integrates **[FlashMLA](https://github.com/Jayden-Xu/FlashMLA)**, a specialized Triton kernel library optimized for MLA architectures. 
+FlashMLA is a high-performance kernel library specifically optimized for Multi-Head Latent Attention (MLA) architectures and integrated in vLLM. Built on OpenAI Triton, it delivers state-of-the-art decoding performance for MLA-based models.
 
-## Benchmark Results
+By leveraging MLA's compressed latent vectors, FlashMLA enables 8-64× smaller KV cache footprints compared to standard attention mechanisms while maintaining competitive throughput. It is designed for memory-bound scenarios where efficient cache management is critical.
 
-We benchmarked this backend against the official vLLM MLA baseline on **NVIDIA A100-80GB** using **DeepSeek-V2-Lite-Chat** with **CUDA Graph enabled**.
+---
+## Key Features
+
+Extreme Speed & Memory Efficiency
+
+Minimum Overhead with CUDA Graph
+
+Production Ready with dynamic Split-K scheduling
+
+---
+
+## Performance Benchmarks
+
+Benchmarks were conducted on **NVIDIA A100-80GB** using **DeepSeek-V2-Lite-Chat** with **CUDA Graph enabled**.
 
 ### Decoding Performance
 
